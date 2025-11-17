@@ -7,6 +7,7 @@ import cv2
 from torchvision.transforms.functional import to_pil_image
 import concurrent.futures
 import numpy as np
+import csv
 
 from imclaslib.metrics import metricutils
 
@@ -145,6 +146,34 @@ def overlay_predictions_video(video_path, predictions, frame_counts, index_to_ta
 
     video_capture.release()
     video_writer.release()
+
+def save_predictions_to_csv(video_path, predictions, frame_counts, index_to_tag, output_csv_path):
+    # Open the video file to get its FPS for timestamp calculation
+    video_capture = cv2.VideoCapture(str(video_path))
+    if not video_capture.isOpened():
+        raise IOError(f"Cannot open video file: {video_path}")
+    fps = metricutils.custom_round(video_capture.get(cv2.CAP_PROP_FPS), 1)
+    video_capture.release()
+
+    # Open the CSV file for writing
+    with open(output_csv_path, 'w', newline='') as file:
+        writer = csv.writer(file)
+        # Write the header
+        header = ["timestamp (s)", "tags"]
+        writer.writerow(header)
+        for i, frame_count in enumerate(frame_counts):
+            if torch.is_tensor(frame_count):
+                frame_count = frame_count.item()  # Converts tensor with a single value to a number
+            else:
+                frame_count = frame_count  # Use as is if not a tensor
+            timestamp = frame_count / fps
+            prediction = predictions[i]
+            # Filter tags that are present (prediction value is 1)
+            row = [index_to_tag[index] for index, value in enumerate(prediction) if value == 1]
+            row.insert(0, timestamp)
+            
+            # Write the timestamp and the concatenated string of tags to the CSV
+            writer.writerow(row)
 
 
 def convert_labels_to_color(labels, num_classes, height=10, width=10):

@@ -36,7 +36,6 @@ def compute_metrics(targets, outputs, average='micro'):
     - recall: float, recall score per class
     - f1: float, F1 score per class
     """
-    
     precision = precision_score(targets, outputs, average=average, zero_division=1.0)
     recall = recall_score(targets, outputs, average=average, zero_division=1.0)
     f1 = sklearnf1(targets, outputs, average=average, zero_division=1.0)
@@ -308,3 +307,6 @@ def find_optimal_temperature(valid_logits, valid_labels, device):
     optimizer.step(eval)
     
     return temperature.item()
+
+def custom_round(x, base=5):
+    return base * round(x/base)

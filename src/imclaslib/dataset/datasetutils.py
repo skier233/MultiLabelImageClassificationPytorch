@@ -4,10 +4,11 @@ from imclaslib.dataset.image_dataset import ImageDataset
 from torch.utils.data import DataLoader
 import imclaslib.files.pathutils as pathutils
 
+
 # Global variable to cache the dataset CSV after being read for the first time.
 dataset_csv = None
 
-def get_train_valid_test_loaders(config):
+def get_train_valid_test_loaders(config, device):
     """
     Creates and returns DataLoaders for the training, validation, and test sets.
 
@@ -19,17 +20,39 @@ def get_train_valid_test_loaders(config):
     """
     global dataset_csv
     dataset_csv = __get_dataset_csv(config)
-    train_data = ImageDataset(dataset_csv, mode='train', config=config)
-    valid_data = ImageDataset(dataset_csv, mode='valid', config=config)
-    test_data = ImageDataset(dataset_csv, mode='test', config=config)
+    train_data = ImageDataset(dataset_csv, mode='train', config=config, device=device)
+    valid_data = ImageDataset(dataset_csv, mode='valid', config=config, device=device)
+    test_data = ImageDataset(dataset_csv, mode='test', config=config, device=device)
 
-    train_loader = DataLoader(train_data, batch_size=config.train_batch_size, shuffle=True, num_workers=6, persistent_workers=True, pin_memory=False)
+    train_loader = DataLoader(train_data, batch_size=config.train_batch_size, shuffle=True, num_workers=0, persistent_workers=False, pin_memory=False)
     valid_loader = DataLoader(valid_data, batch_size=config.train_batch_size, shuffle=False, num_workers=0, persistent_workers=False, pin_memory=False)
     test_loader = DataLoader(test_data, batch_size=config.train_batch_size, shuffle=False, num_workers=0, persistent_workers=False, pin_memory=False)
 
     return train_loader, valid_loader, test_loader
 
-def get_data_loader_by_name(mode, config, shuffle=False, num_workers=1):
+
+def custom_collate_fn(batch):
+    # Initialize containers for each part of your data
+    batched_data = {
+        'image': [],
+        'label': [],
+        'image_path': []
+    }
+
+    # Populate the containers with data from each sample
+    for sample in batch:
+        batched_data['image'].append(sample['image'])
+        batched_data['label'].append(sample['label'])
+        batched_data['image_path'].append(sample['image_path'])
+
+    # Optionally, here you could convert lists to tensors or any appropriate format for your model
+    # Note: If images have different sizes, converting them to a tensor directly will cause an error
+    # For example, for labels, you could do:
+    # batched_data['label'] = torch.stack(batched_data['label'])
+
+    return batched_data
+
+def get_data_loader_by_name(mode, config, device, shuffle=False, num_workers=0):
     """
     Creates and returns a DataLoader for the specified mode.
 
@@ -43,8 +66,8 @@ def get_data_loader_by_name(mode, config, shuffle=False, num_workers=1):
     """
     global dataset_csv
     dataset_csv = __get_dataset_csv(config)
-    data = ImageDataset(dataset_csv, mode=mode, config=config)
-    loader = DataLoader(data, batch_size=config.test_batch_size, shuffle=shuffle, pin_memory=False, persistent_workers=False, num_workers=num_workers)
+    data = ImageDataset(dataset_csv, mode=mode, config=config, device=device)
+    loader = DataLoader(data, batch_size=config.test_batch_size, shuffle=shuffle, pin_memory=False, persistent_workers=False, num_workers=0)#, collate_fn=custom_collate_fn)
     return loader
 
 def get_dataset_tag_mappings(config):

@@ -47,7 +47,7 @@ class ModelTrainer():
         # Compute label frequencies and create weights for the loss function
         #self.label_freqs = self.compute_label_frequencies()
         #self.pos_weight = self.compute_loss_weights(self.label_freqs).to(device)
-        self.criterion = nn.BCEWithLogitsLoss()#MultiLabelFocalLoss()
+        self.criterion = nn.BCEWithLogitsLoss().to(self.device)#MultiLabelFocalLoss()
         self.epochs = self.config.train_num_epochs
         self.lr_scheduler = modelutils.get_learningRate_scheduler(self.optimizer, config)
         self.last_train_loss = 10000
@@ -58,8 +58,8 @@ class ModelTrainer():
         modelToLoadPath = pathutils.get_model_to_load_path(self.config)
         if self.config.train_continue_training and os.path.exists(modelToLoadPath):
             logger.info("Loading the best model...")    
-            if self.config.model_embedding_layer_enabled or self.config.model_gcn_enabled and self.config.train_model_to_load_raw_weights != "":
-                self.model, modelData = modelloadingutils.load_pretrained_weights_exclude_classifier(self.model, self.config, True)
+            if self.config.train_model_to_load_raw_weights != "":
+                self.model, modelData = modelloadingutils.load_pretrained_weights_and_freeze_base(self.model, self.config, True, True)
             else:
                 modelData = modelloadingutils.load_model(modelToLoadPath, self.config)
                 self.model.load_state_dict(modelData['model_state_dict'])
@@ -149,7 +149,12 @@ class ModelTrainer():
 
         for data in tqdm(self.trainloader, total=len(self.trainloader)):
             images, targets = data['image'].to(self.device), data['label'].to(self.device).float()
-            self.optimizer.zero_grad()
+
+            #TODO   https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
+            for param in self.model.parameters():
+                param.grad = None
+
+            #self.optimizer.zero_grad()
 
             # Cast operations to mixed precision
             with autocast(enabled=self.config.model_fp16):
@@ -182,7 +187,7 @@ class ModelTrainer():
         self.last_train_loss = train_loss
         return train_loss
     
-    def distillation_criterion(self, student_outputs, teacher_outputs, student_targets, alpha=0.5, temperature=1.5):
+    def distillation_criterion(self, student_outputs, teacher_outputs, student_targets, alpha=0.9, temperature=1):
         """
         Calculate the distillation loss for multilabel classification.
         :param student_outputs: Logits from the student model.
@@ -222,17 +227,16 @@ class ModelTrainer():
         # Ensure the student's trainloader and the teacher's trainloader have the same length
         assert len(self.trainloader) == len(teacher_trainloader), "The student and teacher trainloaders must have the same number of batches."
 
-        for (student_data, teacher_data) in tqdm(zip(self.trainloader, teacher_trainloader), total=len(self.trainloader)):
+        for student_data in tqdm(self.trainloader):
             student_images, student_targets = student_data['image'].to(self.device), student_data['label'].to(self.device).float()
-            teacher_images = teacher_data['image'].to(self.device)
+            #teacher_images = teacher_data['image'].to(self.device)
             self.optimizer.zero_grad()
-
-            # Forward pass of the teacher model to obtain soft labels
-            with torch.no_grad():
-                teacher_outputs = teacher_model(teacher_images)
 
             # Cast operations to mixed precision
             with autocast(enabled=self.config.model_fp16):
+                # Forward pass of the teacher model to obtain soft labels
+                with torch.no_grad():
+                    teacher_outputs = teacher_model(student_images)
                 student_outputs = self.model(student_images)
 
                 # Verify that outputs and targets have the same shape

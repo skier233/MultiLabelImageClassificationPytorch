@@ -15,14 +15,22 @@ def evaluate_model(this_config, valid_loader=None, test_loader=None, wandbWriter
     # initialize the computation device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    # print(f"onnxruntime device: {ort.get_device()}") # output: GPU
+
+    # print(f'ort avail providers: {ort.get_available_providers()}') # output: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+
+    # ort_session = ort.InferenceSession("onnx_model.onnx", providers=["CUDAExecutionProvider"])
+
+    # print(ort_session.get_providers()) # output: ['CPUExecutionProvider']
+
     if test_loader == None:
-        test_loader = datasetutils.get_data_loader_by_name("test", config=this_config, num_workers=0)
+        test_loader = datasetutils.get_data_loader_by_name("test", config=this_config, num_workers=0, device=device)
     if valid_loader == None:
-        valid_loader = datasetutils.get_data_loader_by_name("valid", config=this_config, num_workers=0)
+        valid_loader = datasetutils.get_data_loader_by_name("valid", config=this_config, num_workers=0, device=device)
 
     # intialize the model
     with get_model_evaluator(this_config, device, wandbWriter=wandbWriter) as modelEvaluator:
-        epochs = modelEvaluator.model_data["epoch"]
+        epochs = 0 #modelEvaluator.model_data["epoch"]
         if this_config.using_wsl and this_config.test_compile:
             modelEvaluator.compile()
         valid_start_time = time.time()
@@ -112,7 +120,7 @@ def evaluate_model(this_config, valid_loader=None, test_loader=None, wandbWriter
         #test_f1_valoptimizedperclass, test_precision_valoptimizedperclass, test_recall_valoptimizedperclass = modelEvaluator.evaluate_predictions(test_loader, test_predictions, test_correct_labels, epochs, threshold=best_f1_thresholds_per_class, average="micro")
         #logger.info(f"Test Best F1 Per Class (Val Optimized): F1: {test_f1_valoptimizedperclass}, Precision: {test_precision_valoptimizedperclass}, Recall: {test_recall_valoptimizedperclass} at Threshold:{best_f1_thresholds_per_class}")
 
-        hparams = metricutils.filter_dict_for_hparams(modelEvaluator.model_data)
+        #hparams = metricutils.filter_dict_for_hparams(modelEvaluator.model_data)
         final_metrics = {
             'F1/Default/Validation/Micro': val_f1_default_micro,
             'F1/Default/Validation/Macro': val_f1_default_macro,
@@ -168,36 +176,37 @@ def evaluate_model(this_config, valid_loader=None, test_loader=None, wandbWriter
         wandbWriter.log_table("F1_Scores_by_Class_Default", ["ClassName", "ClassF1", "ClassPrecision", "ClassRecall", "ClassDatasetCount"], testF1s)
 
         wandbWriter.log({"Dataset/Stats": fileCounts})
-        # Prepare to store results by category
-        f1_scores_by_category = []
-        samples_by_category = []
+        # # Prepare to store results by category
+        # f1_scores_by_category = []
+        # samples_by_category = []
 
-        data = []
-        confidence_thresholds_len = len(confidence_thresholds)
-        # Calculate F1 scores for each category
-        for category in range(confidence_thresholds_len+1):
-            category_mask = (test_confidence_categories == category)
-            category_predictions = test_proabilities[category_mask]
-            category_true_labels = test_correct_labels[category_mask]
+        # data = []
+        # confidence_thresholds_len = len(confidence_thresholds)
+        # # Calculate F1 scores for each category
+        # for category in range(confidence_thresholds_len+1):
+        #     category_mask = (test_confidence_categories == category)
+        #     category_predictions = test_proabilities[category_mask]
+        #     category_true_labels = test_correct_labels[category_mask]
             
-            # Ensure there are samples in the category before calculating F1
-            if category_predictions.shape[0] > 0:
-                binary_predictions = (category_predictions > val_best_f1_threshold).astype(int)
-                category_f1 = metricutils.f1_score(category_true_labels, binary_predictions)
-            else:
-                category_f1 = None
+        #     # Ensure there are samples in the category before calculating F1
+        #     if category_predictions.shape[0] > 0:
+        #         binary_predictions = (category_predictions > val_best_f1_threshold).astype(int)
+        #         category_f1 = metricutils.f1_score(category_true_labels, binary_predictions)
+        #     else:
+        #         category_f1 = None
 
-            f1_scores_by_category.append(category_f1)
-            samples_by_category.append(np.sum(category_mask))
+        #     f1_scores_by_category.append(category_f1)
+        #     samples_by_category.append(np.sum(category_mask))
 
-            # Log results
-            logger.info(f"Confidence Category {category} - Images: {samples_by_category[-1]}, F1 Score: {f1_scores_by_category[-1]}")
+        #     # Log results
+        #     logger.info(f"Confidence Category {category} - Images: {samples_by_category[-1]}, F1 Score: {f1_scores_by_category[-1]}")
 
-            data.append([confidence_thresholds[category] if category < confidence_thresholds_len else 1000, f1_scores_by_category[-1] if category_f1 else 0, samples_by_category[-1] if category_f1 else 0])
-        assert np.sum(samples_by_category) == test_num_images
-        wandbWriter.log_table("Data by Categories of Confidence", ["Confidence Threshold", "F1 Score", "Sample Count"], data)
+        #     data.append([confidence_thresholds[category] if category < confidence_thresholds_len else 1000, f1_scores_by_category[-1] if category_f1 else 0, samples_by_category[-1] if category_f1 else 0])
+        # assert np.sum(samples_by_category) == test_num_images
+        # wandbWriter.log_table("Data by Categories of Confidence", ["Confidence Threshold", "F1 Score", "Sample Count"], data)
 
 def get_model_evaluator(config, device, wandbWriter):
+    #return ModelEvaluator.from_jit_file(device, config, wandbWriter=wandbWriter)
     if config.model_ensemble_model_configs:
         return ModelEvaluator.from_ensemble(device, config, wandbWriter=wandbWriter)
     else:

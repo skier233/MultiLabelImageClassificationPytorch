@@ -6,7 +6,7 @@ import imclaslib.files.pathutils as pathutils
 import imclaslib.models.modelfactory as modelfactory
 import imclaslib.metrics.metricutils as metricutils
 import imclaslib.files.modelloadingutils as modelloadingutils
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 from tqdm import tqdm
 import numpy as np
 import torch.nn as nn
@@ -89,6 +89,7 @@ class ModelEvaluator:
         
         model = modelfactory.create_model(thisconfig).to(device)
         criterion = nn.BCEWithLogitsLoss()
+        torch.backends.cudnn.benchmark = True
 
         modelToLoadPath = pathutils.get_model_to_load_path(thisconfig)
         if os.path.exists(modelToLoadPath):
@@ -99,7 +100,32 @@ class ModelEvaluator:
         else:
             logger.error(f"Could not find a model at path: {modelToLoadPath}")
             raise ValueError(f"Could not find a model at path: {modelToLoadPath}. Check to ensure the config/json value for model_name_to_load is correct!")
+        model = model.to(memory_format=torch.channels_last)
+        return cls(
+            model=model,
+            criterion=criterion,
+            device=device,
+            config=thisconfig,
+            wandbWriter=wandbWriter,
+            model_data=modelData
+        )
+    
+    @classmethod
+    def from_jit_file(cls, device, thisconfig, wandbWriter=None):
+        """
+        Creates a ModelEvaluator instance from a model file by loading in the model and preparing it
+          to be run.
+
+        Parameters:
+            device (torch.device): The device to run evaluation on (CPU or GPU).
+            wandbWriter (WandbWriter, optional): Writer for Wandb logging.
+            config (object): An immutable configuration object with necessary parameters.
+        """
         
+        model = torch.jit.load("giddy_music.pt") #torch.jit.load("trt_model.ep")
+        model = model.to(memory_format=torch.channels_last)
+        criterion = nn.BCEWithLogitsLoss()
+        modelData = {}
         return cls(
             model=model,
             criterion=criterion,
@@ -163,7 +189,7 @@ class ModelEvaluator:
         return outputs
     
     def compile(self):
-        self.model = torch.compile(self.model, mode="max-autotune")
+        self.model = torch.compile(self.model)
     def predict(self, data_loader, return_true_labels=True, threshold=None):
         """
         Perform inference on the given data_loader and return raw predictions.
@@ -186,11 +212,20 @@ class ModelEvaluator:
         total_loss = 0.0  # Initialize total loss
         with torch.no_grad():  # Disable gradient calculation for efficiency
             for batch in tqdm(data_loader, total=len(data_loader)):
-                images = batch['image'].to(self.device)
+                images = batch['image']
+                #batch_size = images.size(0)
+                #if batch_size != self.config.test_batch_size:
+                #    pad_size = self.config.test_batch_size - batch_size
+                #    padding = torch.zeros((pad_size,) + images.shape[1:]) #, device=self.device)
+                #    images = torch.cat([images, padding], dim=0)
+                images = images.to(self.device)
                 if self.config.model_fp16:
                     images = images.half()
-                with autocast(enabled=self.config.model_fp16):
+                with autocast('cuda', enabled=self.config.model_fp16):
                     outputs = model(images)
+                if isinstance(outputs, tuple):
+                    outputs = torch.cat(outputs, dim=1)
+                #outputs = outputs.cpu().numpy()
                 prediction_outputs.append(outputs.cpu().numpy())  # Store raw model outputs
                 
                 # Process labels if they are available and requested
@@ -198,7 +233,7 @@ class ModelEvaluator:
                     labels = batch['label'].to(self.device)
                     loss = self.criterion(outputs, labels.float())  # Calculate loss
                     total_loss += loss.item()  # Accumulate loss
-                    true_labels.append(labels.cpu().numpy())  # Store labels
+                    true_labels.append(labels.float().cpu().numpy())  # Store labels
                 elif not return_true_labels and 'image_path' in batch:
                     image_paths.append(batch['image_path'])
                 elif not return_true_labels and 'frame_count' in batch:

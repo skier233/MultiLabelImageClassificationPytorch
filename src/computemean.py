@@ -43,7 +43,7 @@ if __name__ == '__main__':
     # DataLoader for your dataset
     config.dataset_normalization_mean = None
     config.dataset_normalization_std = None
-    dataloader = datasetutils.get_data_loader_by_name('all', config, shuffle=True)
+    dataloader = datasetutils.get_data_loader_by_name('all', config, shuffle=True,device=torch.device('cpu'))
 
     try:
         # Calculate mean and std

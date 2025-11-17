@@ -19,11 +19,11 @@ def distill_model(teacher_config, student_config, wandbWriter=None):
     # Initialize the computation device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Get train, validation, and test dataset loaders
-    teacher_train_loader = datasetutils.get_data_loader_by_name('train', config=teacher_config)
-    train_loader, valid_loader, test_loader = datasetutils.get_train_valid_test_loaders(config=student_config)
+    teacher_train_loader = datasetutils.get_data_loader_by_name('train', config=teacher_config, device=device)
+    train_loader, valid_loader, test_loader = datasetutils.get_train_valid_test_loaders(config=student_config, device=device)
     try:
         # Initialize the model trainer 
-        with ModelTrainer(device, train_loader, valid_loader, test_loader, config=student_config, wandbWriter=wandbWriter) as modelTrainer, ModelEvaluator.from_trainer(modelTrainer) as modelEvaluator, ModelEvaluator.from_file(device, teacher_config) as teacherEvaluator:
+        with ModelTrainer(device, teacher_train_loader, valid_loader, test_loader, config=student_config, wandbWriter=wandbWriter) as modelTrainer, ModelEvaluator.from_trainer(modelTrainer) as modelEvaluator, ModelEvaluator.from_file(device, teacher_config) as teacherEvaluator:
             # Start the training and validation
             try:
                 for epoch in range(modelTrainer.start_epoch, modelTrainer.epochs):

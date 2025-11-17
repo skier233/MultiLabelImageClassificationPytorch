@@ -6,6 +6,7 @@ from imclaslib.models.ensemble_classifier import EnsembleClassifier
 from imclaslib.models.gcn_classifier import GCNClassifier
 from imclaslib.models.multilabel_classifier import MultiLabelClassifier
 from imclaslib.models.multilabel_embeddinglayer_model import MultiLabelClassifier_LabelEmbeddings
+from timm.models.maxxvit import MaxxVitCfg, _tf_cfg, build_model_with_cfg, MaxxVit, checkpoint_filter_fn
 
 def create_model(config):
     """
@@ -94,6 +95,6 @@ def create_model(config):
         )
     else:
         # If not using the embedding layer, create a MultiLabelClassifier with dropout
-        model = MultiLabelClassifier(model, config.model_num_classes, config.train_dropout_prob / 100)
+        model = MultiLabelClassifier(model, config)
         #print(model)
     return model

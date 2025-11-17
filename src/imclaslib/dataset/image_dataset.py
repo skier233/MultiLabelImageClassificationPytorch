@@ -6,12 +6,15 @@ import numpy as np
 from torchvision.transforms import v2 as transforms
 from torchvision.transforms.v2.functional import resize
 from torch.utils.data import Dataset
+from tqdm import tqdm
 from imclaslib.files import pathutils
 from imclaslib.logging.loggerfactory import LoggerFactory
 import imclaslib.dataset.datasetutils as datasetutils
 from torchvision.transforms.functional import InterpolationMode
 from PIL import Image
 import pandas as pd
+from torchvision.io import read_image
+
 logger = LoggerFactory.get_logger(f"logger.{__name__}")
 
 class ImageDataset(Dataset):
@@ -19,7 +22,7 @@ class ImageDataset(Dataset):
     A dataset class for loading and transforming images for model training and evaluation.
     """
 
-    def __init__(self, csv, mode, config, random_state=42): 
+    def __init__(self, csv, mode, config, device, random_state=9): 
         """
         Initializes the dataset with images and labels based on the provided CSV file and mode.
         
@@ -37,6 +40,7 @@ class ImageDataset(Dataset):
         self.csv = csv
         self.config = config
         self.mode = mode
+        self.device = device
         #self.csv['identifier'] = self.csv['filepath']
         if config.using_wsl:
             self.csv['filepath'] = self.csv['filepath'].apply(pathutils.convert_windows_path_to_wsl)
@@ -111,17 +115,17 @@ class ImageDataset(Dataset):
         
         if self.config.dataset_preprocess_to_RAM:
             self.data = []
-            for index, file_path in enumerate(self.image_names):
+            for index, file_path in tqdm(enumerate(self.image_names), total=len(self.image_names)):
                 label = self.labels[index]
 
-                image = Image.open(file_path).convert('RGB')
+                image = read_image(file_path).to(self.device)#Image.open(file_path).convert('RGB')
                 if image is None:
                     logger.warning(f"Warning: Image not found or corrupted at path: {file_path}")
                     return None
                 image = resize(image, (self.image_size, self.image_size), interpolation=InterpolationMode.BICUBIC)
                 item = {
                     'image': image,
-                    'label': torch.tensor(label, dtype=torch.float32),
+                    'label': torch.tensor(label, dtype=torch.float16),
                     'image_path': file_path
                 }
                 self.data.append(item)
@@ -174,7 +178,7 @@ class ImageDataset(Dataset):
 
         if self.config.dataset_normalization_mean == None:
             transforms_list = [
-                transforms.ToImage(),
+                #transforms.ToImage(),
                 transforms.Resize((self.image_size, self.image_size), interpolation=InterpolationMode.BICUBIC),
                 transforms.RandomHorizontalFlip(p=horizontal_flip_prob) if augmentation_level > 0 else None,
                 transforms.ColorJitter(brightness=color_jitter_brightness, contrast=color_jitter_contrast, saturation=color_jitter_saturation) if augmentation_level > 0 else None,
@@ -183,12 +187,12 @@ class ImageDataset(Dataset):
                                         scale=(affine_transform_scale_min, affine_transform_scale_max)) if augmentation_level > 0 else None,
                 transforms.RandomPerspective(distortion_scale=perspective_distortion_scale, p=0.5) if augmentation_level > 0 else None,
                 transforms.GaussianBlur(kernel_size=(5, 9), sigma=gaussian_blur_sigma) if augmentation_level > 0 else None,
-                transforms.ToDtype(torch.float32, scale=True),
+                transforms.ToDtype(torch.float16, scale=True),
                 transforms.RandomErasing(p=random_erasing_prob, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0) if augmentation_level > 0 else None,
             ]
         elif self.config.dataset_preprocess_to_RAM:
             transforms_list = [
-                transforms.ToImage(),
+                #transforms.ToImage(),
                 transforms.RandomHorizontalFlip(p=horizontal_flip_prob) if augmentation_level > 0 else None,
                 transforms.ColorJitter(brightness=color_jitter_brightness, contrast=color_jitter_contrast, saturation=color_jitter_saturation) if augmentation_level > 0 else None,
                 transforms.RandomRotation(degrees=rotation_degrees) if augmentation_level > 0 else None,
@@ -196,13 +200,13 @@ class ImageDataset(Dataset):
                                         scale=(affine_transform_scale_min, affine_transform_scale_max)) if augmentation_level > 0 else None,
                 transforms.RandomPerspective(distortion_scale=perspective_distortion_scale, p=0.5) if augmentation_level > 0 else None,
                 transforms.GaussianBlur(kernel_size=(5, 9), sigma=gaussian_blur_sigma) if augmentation_level > 0 else None,
-                transforms.ToDtype(torch.float32, scale=True),
+                transforms.ToDtype(torch.float16, scale=True),
                 transforms.RandomErasing(p=random_erasing_prob, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0) if augmentation_level > 0 else None,
                 transforms.Normalize(mean=self.config.dataset_normalization_mean, std=self.config.dataset_normalization_std),
             ]
         else:
             transforms_list = [
-                transforms.ToImage(),
+                #transforms.ToImage(),
                 transforms.Resize((self.image_size, self.image_size), interpolation=InterpolationMode.BICUBIC),
                 transforms.RandomHorizontalFlip(p=horizontal_flip_prob) if augmentation_level > 0 else None,
                 transforms.ColorJitter(brightness=color_jitter_brightness, contrast=color_jitter_contrast, saturation=color_jitter_saturation) if augmentation_level > 0 else None,
@@ -211,7 +215,7 @@ class ImageDataset(Dataset):
                                         scale=(affine_transform_scale_min, affine_transform_scale_max)) if augmentation_level > 0 else None,
                 transforms.RandomPerspective(distortion_scale=perspective_distortion_scale, p=0.5) if augmentation_level > 0 else None,
                 transforms.GaussianBlur(kernel_size=(5, 9), sigma=gaussian_blur_sigma) if augmentation_level > 0 else None,
-                transforms.ToDtype(torch.float32, scale=True),
+                transforms.ToDtype(torch.float16, scale=True),
                 transforms.RandomErasing(p=random_erasing_prob, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0) if augmentation_level > 0 else None,
                 transforms.Normalize(mean=self.config.dataset_normalization_mean, std=self.config.dataset_normalization_std),
             ]
@@ -225,21 +229,21 @@ class ImageDataset(Dataset):
         transforms_list = []
         if self.config.dataset_normalization_mean == None:
             transforms_list = [
-                transforms.ToImage(),
+                #transforms.ToImage(),
                 transforms.Resize((self.image_size, self.image_size), interpolation=InterpolationMode.BICUBIC),
-                transforms.ToDtype(torch.float32, scale=True),
+                transforms.ToDtype(torch.float16, scale=True),
             ]
         elif self.config.dataset_preprocess_to_RAM:
             transforms_list = [
-                transforms.ToImage(),
-                transforms.ToDtype(torch.float32, scale=True),
+                #transforms.ToImage(),
+                transforms.ToDtype(torch.float16, scale=True),
                 transforms.Normalize(mean=self.config.dataset_normalization_mean, std=self.config.dataset_normalization_std),
             ]
         else:
             transforms_list = [
-                transforms.ToImage(),
+                #transforms.ToImage(),
                 transforms.Resize((self.image_size, self.image_size), interpolation=InterpolationMode.BICUBIC),
-                transforms.ToDtype(torch.float32, scale=True),
+                transforms.ToDtype(torch.float16, scale=True),
                 transforms.Normalize(mean=self.config.dataset_normalization_mean, std=self.config.dataset_normalization_std),
             ]
         return transforms.Compose(transforms_list)
@@ -248,21 +252,21 @@ class ImageDataset(Dataset):
         transforms_list = []
         if self.config.dataset_normalization_mean == None:
             transforms_list = [
-                transforms.ToImage(),
+                #transforms.ToImage(),
                 transforms.Resize((self.image_size, self.image_size), interpolation=InterpolationMode.BICUBIC),
-                transforms.ToDtype(torch.float32, scale=True),
+                transforms.ToDtype(torch.float16, scale=True),
             ]
         elif self.config.dataset_preprocess_to_RAM:
             transforms_list = [
-                transforms.ToImage(),
-                transforms.ToDtype(torch.float32, scale=True),
+                #transforms.ToImage(),
+                transforms.ToDtype(torch.float16, scale=True),
                 transforms.Normalize(mean=self.config.dataset_normalization_mean, std=self.config.dataset_normalization_std),
             ]
         else:
             transforms_list = [
-                transforms.ToImage(),
+                #transforms.ToImage(),
                 transforms.Resize((self.image_size, self.image_size), interpolation=InterpolationMode.BICUBIC),
-                transforms.ToDtype(torch.float32, scale=True),
+                transforms.ToDtype(torch.float16, scale=True),
                 transforms.Normalize(mean=self.config.dataset_normalization_mean, std=self.config.dataset_normalization_std),
             ]
             
@@ -274,6 +278,11 @@ class ImageDataset(Dataset):
         """
         return len(self.image_names)
     
+    def read_image_as_byte_array(image_path):
+        with open(image_path, 'rb') as f:
+            img_byte_array = np.frombuffer(f.read(), dtype=np.uint8)
+        return img_byte_array
+
     def __getitem__(self, index):
         """
         Retrieves an image and its labels at the given index, applying appropriate transforms.
@@ -285,16 +294,20 @@ class ImageDataset(Dataset):
                 'image_path': (self.data[index])['image_path']
             }
         image_path = self.image_names[index]
-        image = Image.open(image_path).convert('RGB')
+        try:
+            image = read_image(image_path)#Image.open(image_path).convert('RGB')
+        except:
+            logger.warning(f"Warning: Image not found or corrupted at path: {image_path}")
+            return None
         if image is None:
             logger.warning(f"Warning: Image not found or corrupted at path: {image_path}")
             return None
-        # apply image transforms
+        #apply image transforms
         image = self.transform(image)
         targets = self.labels[index]
         
         return {
-            'image': image,
+            'image': image, #ImageDataset.read_image_as_byte_array(image_path),
             'label': torch.tensor(targets, dtype=torch.float32),
             'image_path': image_path
         }
@@ -304,7 +317,7 @@ class ImageDataset(Dataset):
         large_prime = 2**61 - 1
         return int(hashlib.sha256(x.encode('utf-8')).hexdigest(), 16) % large_prime
 
-    def stable_split(self, data, train_percent, valid_percent, test_percent, random_state=None):
+    def stable_split(self, data, train_percent, valid_percent, test_percent, random_state=None, invert=False):
         # Ensure that the sum of the sizes is <= 1
         if train_percent + valid_percent + test_percent > 100:
             raise ValueError("The sum of train, valid, and test sizes should be <= 100.")
@@ -314,6 +327,10 @@ class ImageDataset(Dataset):
 
         # Assign a unique number to each element based on a hash of its identifier
         hashed_ids = data['identifier'].apply(lambda x: self.stable_hash(video_frame_group(x)))
+
+        if invert:
+            # Flip the hashed IDs to get a complementary split
+            hashed_ids = (2**61 - 1) - hashed_ids
 
         # Calculate the split thresholds
         train_threshold = np.percentile(hashed_ids, train_percent)

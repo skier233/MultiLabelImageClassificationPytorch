@@ -18,8 +18,9 @@ def train_model(config, wandbWriter=None):
 
     # Initialize the computation device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    torch.backends.cudnn.benchmark = True
     # Get train, validation, and test dataset loaders
-    train_loader, valid_loader, test_loader = datasetutils.get_train_valid_test_loaders(config=config)
+    train_loader, valid_loader, test_loader = datasetutils.get_train_valid_test_loaders(config=config, device=device)
     try:
         # Initialize the model trainer 
         with ModelTrainer(device, train_loader, valid_loader, test_loader, config=config, wandbWriter=wandbWriter) as modelTrainer, ModelEvaluator.from_trainer(modelTrainer) as modelEvaluator:

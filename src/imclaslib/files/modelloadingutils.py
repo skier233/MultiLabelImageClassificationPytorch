@@ -51,6 +51,7 @@ def load_model(model_path, config):
     Returns:
         model_data (dict): The model data from the file.
     """
+    print(model_path)
     checkpoint = torch.load(model_path)
     
     model_data = add_model_data(checkpoint, config)
@@ -110,24 +111,27 @@ def update_config_from_model_file(config):
             config.model_image_size = model_image_size
         return
     
-def load_pretrained_weights_exclude_classifier(new_model, config, freeze_base_model=False):
+def load_pretrained_weights_and_freeze_base(new_model, config, freeze_base=True, load_classifier=False):
     pretrained_model_path = pathutils.combine_path(config, pathutils.get_output_dir_path(config), f"{config.train_model_to_load_raw_weights}.pth")
     path = str(pretrained_model_path)
     # Load the state dictionary of the pretrained model
     pretrained_state_dict = torch.load(path)
     model_data = add_model_data(pretrained_state_dict, config)
-    # Remove the weights for the final classifier layer from the pretrained state_dict
-    classifier_keys = [key for key in pretrained_state_dict if key.startswith('classifier.') or key.startswith('fc.') or key.startswith('head.') or key.startswith('heads.') ]
-    for key in classifier_keys:
-        pretrained_state_dict.pop(key)
-
-    # Load the remaining weights into the new model's base model
-    # This will exclude the final classifier layer
-    new_model.base_model.load_state_dict(pretrained_state_dict, strict=False)
-
-    # Freeze the parameters of the base model, if required
-    if freeze_base_model:
-        for param in new_model.base_model.parameters():
+    
+    # If not loading the classifier, filter out classifier keys from the state dict
+    if not load_classifier:
+        pretrained_state_dict = {k: v for k, v in model_data['model_state_dict'].items() if not k.startswith('classifier.')}
+    
+    # Load the modified state dict into the new model
+    new_model.load_state_dict(pretrained_state_dict, strict=False)
+    
+    if freeze_base:
+        # Freeze all parameters in the model
+        for param in new_model.parameters():
             param.requires_grad = False
+        
+        # Unfreeze the parameters in the classifier layer
+        for param in new_model.classifier.parameters():
+            param.requires_grad = True
 
     return new_model, model_data

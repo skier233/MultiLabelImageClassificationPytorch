@@ -2,18 +2,29 @@ from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 import cv2
 from imclaslib.logging.loggerfactory import LoggerFactory
+from imclaslib.metrics import metricutils
 logger = LoggerFactory.get_logger(f"logger.{__name__}")
 
 class VideoDatasetPredict(Dataset):
     """Custom dataset for loading images from a list of image paths."""
     def __init__(self, video_path, time_interval, config):
         self.cap = cv2.VideoCapture(video_path)
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.fps = metricutils.custom_round(self.cap.get(cv2.CAP_PROP_FPS), 1)
         self.frame_interval = int(self.fps * time_interval)
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.image_paths = video_path
         self.config = config
         self.transform = VideoDatasetPredict.test_transforms(self.config)
+
+        self.preprcoesseded_data = {}
+        framesTotal = self.total_frames // self.frame_interval
+        for i in range(0, framesTotal):
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, i * self.frame_interval)
+            ret, frame = self.cap.read()
+            if ret:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame = self.transform(frame)
+                self.preprcoesseded_data[i] = frame
 
     def __len__(self):
         return self.total_frames // self.frame_interval
@@ -36,22 +47,21 @@ class VideoDatasetPredict(Dataset):
         frame_idx = idx * self.frame_interval
 
         # Set the video capture to the correct frame
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = self.cap.read()
+        # self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        # ret, frame = self.cap.read()
 
-        # Check if the frame was read correctly
-        if not ret:
-            logger.warn(f"Frame at index {frame_idx} could not be read")
-            return None
+        # # Check if the frame was read correctly
+        # if not ret:
+        #     logger.warn(f"Frame at index {frame_idx} could not be read")
+        #     return None
 
-        # Convert the frame from BGR to RGB
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # # Convert the frame from BGR to RGB
+        # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        frame = self.transform(frame)
+        # frame = self.transform(frame)
 
         return {
-            'image': frame,
+            'image': self.preprcoesseded_data[idx],
             'frame_count': frame_idx
         }
-    
     

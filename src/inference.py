@@ -15,6 +15,8 @@ from pathlib import Path
 from PIL import Image
 from imclaslib.logging.loggerfactory import LoggerFactory
 from imclaslib.metrics import metricutils
+import pandas as pd
+
 thisconfig = Config("default_config.yml")
 logger = LoggerFactory.setup_logging("logger", log_file=pathutils.combine_path(thisconfig, 
     pathutils.get_log_dir_path(thisconfig), 
@@ -54,7 +56,7 @@ def main(args):
         image_count = len(image_dataset)
         logger.info(f"Took {seconds} seconds to predict for {image_count} images with an average of {image_count/seconds} images per second")
         logits = torch.Tensor(predictionResults['predictions']).to(device)
-        scaled_logits = metricutils.temperature_scale(logits, optimalTemp)
+        scaled_logits = logits #metricutils.temperature_scale(logits, optimalTemp)
         prediction_confidences = metricutils.getConfidences(scaled_logits)
         predictions = metricutils.getpredictions_with_threshold(scaled_logits, device, threshold=0.5)
         image_paths = predictionResults['image_paths']
@@ -98,11 +100,14 @@ def main(args):
 
 
         #Save the images with overlaid predictions
-        for image_path, pred in zip(flattened_image_paths, predictions):
-           original_image = Image.open(image_path)
-           annotated_image = imageutils.overlay_predictions(original_image, pred, datasetutils.get_index_to_tag_mapping(thisconfig))
-           save_path = os.path.join(output_folder, os.path.basename(image_path))
-           annotated_image.save(save_path)
+        # for image_path, pred in zip(flattened_image_paths, predictions):
+        #     try:
+        #         original_image = Image.open(image_path)
+        #         annotated_image = imageutils.overlay_predictions(original_image, pred, datasetutils.get_index_to_tag_mapping(thisconfig))
+        #         save_path = os.path.join(output_folder, os.path.basename(image_path))
+        #         annotated_image.save(save_path)
+        #     except:
+        #         print(f"Error processing image: {image_path}")
     elif input_path.is_file():
         if str(input_path).lower().endswith(('.png', '.jpg', '.jpeg')):
             preprocessed_img = ImageDatasetPredict.preprocess_single_image(str(input_path), thisconfig)
@@ -114,16 +119,98 @@ def main(args):
 
         elif str(input_path).lower().endswith(('.mp4', '.avi', '.mov')):
             input_path = str(input_path)
+            curr = time.time()
             video_dataset = VideoDatasetPredict(input_path, args.time_interval, config=thisconfig)
             dataset_loader = DataLoader(video_dataset, batch_size=thisconfig.test_batch_size, shuffle=False)
-            predictionResults = modelEvaluator.predict(dataset_loader, False, 0.5)
-            predictions = predictionResults['predictions']
+            optimalTemp = thisconfig.model_temperature
+            predictionResults = modelEvaluator.predict(dataset_loader, False)
+
+            newTime = time.time()
+            print("Processed video2_2.mp4 in: ", newTime - curr)
+            logits = torch.Tensor(predictionResults['predictions']).to(device)
             frame_counts = predictionResults['frame_counts']
+            scaled_logits = metricutils.temperature_scale(logits, optimalTemp)
+            predictions = metricutils.getpredictions_with_threshold(scaled_logits, device, threshold=0.4141)
 
             flattened_frame_counts = [frame_count for sublist in frame_counts for frame_count in sublist]
 
+            base_name = os.path.basename(input_path)
+            root_name, _ = os.path.splitext(base_name)  # Split the extension from the filename
+            csv_filename = f"{root_name}.csv"  # Append .csv extension
+            save_path = os.path.join(output_folder, csv_filename)
+            imageutils.save_predictions_to_csv(input_path, predictions, flattened_frame_counts, datasetutils.get_index_to_tag_mapping(thisconfig), save_path)
+            
             save_path = os.path.join(output_folder, os.path.basename(input_path))
             imageutils.overlay_predictions_video(input_path, predictions, flattened_frame_counts, datasetutils.get_index_to_tag_mapping(thisconfig), save_path)
+        elif str(input_path).lower().endswith(('.csv')):
+            print("CSV file detected")
+            # Load the CSV file and extract image paths
+            df = pd.read_csv(input_path)
+            image_paths = df.iloc[:, 0].tolist()
+
+            # Create an ImageDatasetPredict instance with the image paths
+            temp_paths = image_paths
+            if thisconfig.using_wsl:
+                temp_paths = [pathutils.convert_windows_path_to_wsl(path) for path in image_paths]
+            image_dataset = ImageDatasetPredict(temp_paths, config=thisconfig)
+            dataset_loader = DataLoader(image_dataset, batch_size=thisconfig.test_batch_size, shuffle=False, num_workers=6, persistent_workers=True, pin_memory=False)
+
+            # Run the model prediction on the batched data
+            optimalTemp = thisconfig.model_temperature
+            predict_start_time = time.time()
+            predictionResults = modelEvaluator.predict(dataset_loader, False)
+            predict_end_time = time.time()
+
+            seconds = predict_end_time - predict_start_time
+            image_count = len(image_dataset)
+            logger.info(f"Took {seconds} seconds to predict for {image_count} images with an average of {image_count/seconds} images per second")
+
+            logits = torch.Tensor(predictionResults['predictions']).to(device)
+            scaled_logits = logits  # metricutils.temperature_scale(logits, optimalTemp)
+            prediction_confidences = metricutils.getConfidences(scaled_logits)
+            predictions = metricutils.getpredictions_with_threshold(scaled_logits, device, threshold=0.5)
+            image_paths = predictionResults['image_paths']
+            flattened_image_paths = [path for sublist in image_paths for path in sublist]
+            uncertainty_metrics = metricutils.uncertainty_metrics(prediction_confidences)
+            cumul_uncertainty = uncertainty_metrics['cumulative_uncertainties']
+            max_uncertainty = uncertainty_metrics['max_uncertainties']
+            mean_uncertainty = uncertainty_metrics['mean_uncertainties']
+            mean_entropy = uncertainty_metrics['mean_entropies']
+
+            # Prepare CSV data
+            csv_data = []
+            for i, (image_path, pred, cumul_uncertainty, max_uncert, mean_uncert, mean_entrop) in enumerate(zip(flattened_image_paths, predictions, cumul_uncertainty, max_uncertainty, mean_uncertainty, mean_entropy)):
+                # Make sure pred is a list and uncertainty is a scalar
+                pred_list = pred.tolist() if isinstance(pred, torch.Tensor) else list(pred)
+                uncertainty_scalar = float(cumul_uncertainty)  # Convert to a Python float
+                # Create a row with existing CSV data and new predictions
+                existing_row = df.iloc[i].tolist()
+                if thisconfig.using_wsl:
+                    image_path = pathutils.convert_wsl_path_to_windows(image_path)
+                row = existing_row + pred_list
+                csv_data.append(row)
+
+            # Save the updated data to a new CSV file
+            output_csv_path = os.path.join(output_folder, 'output_with_tags.csv')
+            while True:
+                try:
+                    with open(output_csv_path, 'w', newline='') as csv_file:
+                        csv_writer = csv.writer(csv_file)
+                        # Write the header
+                        tagmappings = datasetutils.get_index_to_tag_mapping(thisconfig)
+                        existing_headers = df.columns.tolist()
+                        new_headers = [f'{tagmappings[i]}' for i in range(len(predictions[0]))]
+                        header = existing_headers + new_headers
+                        csv_writer.writerow(header)
+                        # Write the rows
+                        csv_writer.writerows(csv_data)
+                    break  # Exit the loop if file writing was successful
+                except PermissionError:
+                    print("The file is currently open and cannot be written to. Please close the file and press Enter to retry.")
+                    input()  # Wait for user to indicate they've closed the file
+                except Exception as e:
+                    print(f"An unexpected error occurred: {e}")
+                    break  # Exit the loop if an unexpected error occurs
         else:
             print(f"Unsupported file type for input: {input_path}")
     else:
